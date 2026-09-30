@@ -1,0 +1,9 @@
+devicename: "Yayati12"
+mode: "full"
+source: "F:/PhoneStorage"
+destination: "E:/Backups/Phone01/destination"
+backup: "E:/Backups/Phone01/backup"
+archive: "E:/Backups/Phone01/archive"
+file_types:
+  - ".mp4"
+  - ".jpg"

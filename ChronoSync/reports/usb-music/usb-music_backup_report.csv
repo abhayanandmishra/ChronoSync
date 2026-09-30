@@ -1,0 +1,10 @@
+run_id,Run Timestamp,Device,Mode,Status,Source file count,Source total size (MB),Files copied this run,Files validated (hash match),Files skipped (already up-to-date),Conflicts resolved (timestamped backup),Errors this run,Total files at destination,Destination total size (MB),Total files at backup,Backup total size (MB),Total files at archive,Archive total size (MB),rolled_back_at,affected_files_count,result
+run-20260912113824-c9e36ed5,2026-09-12 11:38:26,usb-music,incremental,rollback,3,35.42,3,6,0,0,0,3,35.42,3,0.0,3,35.42,,,
+run-20260912114019-76ae1429,2026-09-12 11:40:20,usb-music,incremental,rollback,3,35.42,3,6,0,0,0,3,35.42,3,0.0,3,35.42,,,
+run-20260912115107-9515ad4d,2026-09-12 11:51:08,usb-music,incremental,rollback,2,23.43,2,4,0,0,0,2,23.43,2,0.0,2,23.43,,,
+run-20260912123722-8d0fc553,2026-09-12 12:37:29,usb-music,incremental,completed,1,13.84,4,8,0,0,0,4,46.4,4,0.0,4,46.4,,,
+run-20260912123837-2c368326,2026-09-12 12:38:42,usb-music,incremental,rollback,2,22.16,2,4,0,0,0,6,68.55,6,0.0,6,68.55,,,
+run-20260912123948-461e90eb,2026-09-12 12:39:49,usb-music,incremental,completed,2,22.16,0,0,4,0,0,5,54.71,6,0.0,6,68.55,,,
+run-20260912135740-87235084,2026-09-12 13:57:45,usb-music,incremental,rollback,2,22.16,2,4,0,0,0,5,54.71,6,0.0,6,68.55,2026-09-12 13:59:57,4,success
+run-20260912140107-82c7c0b3,2026-09-12 14:01:11,usb-music,incremental,rollback,2,22.16,2,4,0,0,0,5,54.71,6,0.0,6,68.55,2026-09-12 14:02:16,4,success
+run-20260914102224-ff01ef97,2026-09-14 10:23:31,usb-music,incremental,completed,15,209.41,15,30,0,10,0,804,7811.57,15,0.01,806,7705.49

@@ -1,0 +1,8 @@
+devicename: "usb-music"
+mode: "incremental"   # options: "incremental" or "full"
+source: "E:\\pdrive\\songstomove"
+destination: "E:\\pdrive\\songstomove2"
+backup: "E:\\pdrive\\backup"
+archive: "E:\\pdrive\\archive"
+file_types:
+  - ".mp3"

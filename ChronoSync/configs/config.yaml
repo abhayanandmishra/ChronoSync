@@ -1,0 +1,9 @@
+mode: "incremental"   # options: "incremental" or "full"
+source: "/path/to/source"
+destination: "/path/to/destination"
+backup: "/path/to/backup"
+archive: "/mnt/external_drive/archive"
+file_types:
+  - ".mp3"
+  - ".jpg"
+  - ".png"
