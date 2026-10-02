@@ -220,11 +220,22 @@ def main():
             margin-bottom: 0.75rem;
             box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
         }
+        .block-container p,
+        .block-container li,
+        .block-container label,
+        .block-container span,
+        .block-container div[data-testid='stCaptionContainer'],
+        .block-container div[data-testid='stAlert'] {
+            font-size: 1.05rem;
+        }
         .card-label { color: #6b7280; font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
         .card-value { color: #111827; font-size: 1.05rem; font-weight: 700; margin-top: 0.35rem; }
         .metric-card-compact { padding: 0.7rem 0.85rem 0.6rem; }
-        .metric-label-compact { font-size: 0.72rem; }
-        .metric-value-compact { font-size: 0.88rem; margin-top: 0.25rem; }
+        .metric-label-compact { font-size: 0.85rem; }
+        .metric-value-compact { font-size: 1.05rem; margin-top: 0.25rem; }
+        div[data-testid='stMetricLabel'] { font-size: 0.85rem; }
+        div[data-testid='stMetricValue'] { font-size: 1.05rem; }
+        button[data-baseweb='tab'] { font-size: 1.05rem; }
         .subtle { color: #6b7280; }
         div[data-testid='stMetric'] {
             background: #fff;
