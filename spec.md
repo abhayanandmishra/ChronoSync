@@ -13,6 +13,13 @@ This document defines the required behavior, acceptance criteria, and constraint
 ## 1. Overview
 ChronoSync is a Python-based backup and synchronization utility designed to copy configured media and file types from a source directory to destination, backup, and archive locations. The system must preserve file integrity, handle conflicts safely, reduce unnecessary re-copying in incremental mode, and generate clear run reports and error logs.
 
+### Terminology
+The following terms are used consistently throughout this specification:
+
+- **Destination:** The primary sync target location where files are actively copied during sync operations. This is where users and applications interact with synced files.
+- **Archive:** Secondary persistent storage where backup copies are kept long-term. The archive serves as a resilient copy location, separate from the destination.
+- **Backup:** A metadata-only audit trail and record system. The backup is NOT a file storage location; it contains JSON records documenting what was copied, when, and where. Backup metadata is stored in the backup directory.
+
 ## 2. Objective
 Create a reliable backup workflow that helps users protect files while preserving data integrity and minimizing accidental overwrite and duplication issues.
 
@@ -21,19 +28,24 @@ Create a reliable backup workflow that helps users protect files while preservin
 - recursive source scanning
 - extension-based filtering
 - incremental and full sync execution
-- copy operations to destination / backup / archive
+- copy operations to destination and archive locations
 - checksum validation
 - conflict-safe naming strategy
 - summary reporting and logging
-- YAML configuration
-- CLI entrypoints
-- unit testing with edge cases
+- dashboard interface for monitoring and management (web-based UI)
+- YAML configuration with runtime override support
+- purge destination operations with action recording
+- archive restore operations with conflict detection
+- rollback by run_id with report integrity preservation
+- CLI entrypoints for all operational modes
+- unit testing with edge cases and high coverage
 
 ### Out of scope
-- GUI interface
 - cloud storage integration
-- file versioning beyond timestamped/hash-suffixed copies
+- file versioning beyond hash-suffixed/renamed copies
 - real-time synchronization monitoring
+- data deduplication or compression
+- multi-user collaboration features
 
 ## 4. Functional Requirements
 
@@ -46,24 +58,27 @@ The system shall load a YAML config file containing runtime settings such as:
 - file_types
 - mode
 - devicename
-- reports_path (optional)
+- reports_path
 
 The system shall:
 - validate required configuration keys before performing any file operation
-- require these keys: mode, source, destination, backup, archive, file_types
+- require these keys: mode, source, backup, archive, file_types, devicename, reports_path
 - reject empty or invalid values with clear errors
 - ensure mode is either "incremental" or "full"
 - ensure source is an existing directory path
-- ensure destination, backup, and archive are valid paths or can be created
+- treat destination as optional
+- ensure backup, archive, and reports_path are valid paths or can be created
+- if destination is provided, ensure it is a valid path or can be created
 - ensure file_types is a non-empty list of extensions such as .mp3, .jpg, .png
-- allow an optional `reports_path` value to override the default location where report and error files are written
-- if `reports_path` is not supplied, store report output under the default device-specific reports directory, such as `reports/<device>/`
+- require `reports_path` as the base location where report and error files are written
+- store report output under a device-specific folder inside `reports_path`, such as `<reports_path>/<device>/`
 - read YAML safely using standard parsing methods
 - raise clear exceptions when required values are missing or invalid
 
-The runtime interface shall also allow the user to provide the config file location explicitly, such as `--config path/to/config.yaml`, while device-based resolution remains supported when appropriate.
+The runtime interface shall allow the user to provide the config file location explicitly, such as `--config /any/path/to/config.yaml`, and the config file is not required to live inside the ChronoSync project tree.
 The dashboard or UI shall also support loading a config file at runtime through a file-picker or a dedicated “Load Config” action so the user can select a YAML file without restarting the app or relying only on default discovery.
 If no explicit config path is provided, the system may resolve the config from the default project locations or the current device context as defined by the application behavior.
+If destination is omitted, the system shall still run using archive and backup metadata flows, and reporting must clearly indicate that no destination target was configured for that run.
 
 ### 4.2 Source File Discovery
 The system shall:
@@ -85,12 +100,13 @@ The system shall support two operating modes:
 - Ignore whether the target file already exists or is unchanged
 
 ### 4.4 Copy Operations
-The system shall copy files to destination and archive locations as configured.
+The system shall copy files to archive and, when configured, to destination.
 
 For each source file it must:
 - ensure the target folder exists
-- copy the file safely
-- verify the target file successfully matches the source content
+- copy the file safely to archive
+- if destination is configured, copy the file safely to destination
+- verify the target file successfully matches the source content for every target written in that run
 - track file-level status: copied, validated, skipped, or error
 
 ### 4.5 Conflict Resolution
@@ -100,7 +116,7 @@ When a target file already exists with different content, the system shall:
 - record the conflict as resolved
 - continue processing subsequent files
 
-Archive is the actual copied storage location. Backup is metadata-only and should not contain duplicate file content.
+Archive is the required copied storage location. Destination is an optional active sync target. Backup is metadata-only and should not contain duplicate file content.
 
 ### Purge Destination and Archive Restore Operations
 The system shall support explicit destination purge and archive restore actions as separate operational workflows.
@@ -134,12 +150,12 @@ For each restore action, the system shall validate integrity before overwriting 
 Archive restore is distinct from rollback. Rollback removes the files and metadata associated with a prior run, while archive restore selectively brings archived files back into the destination for recovery or replay.
 
 ### 4.6 Backup Metadata
-The system shall maintain a metadata file inside the backup directory for each run or each copied file.
+The system shall maintain metadata inside the backup directory with a single active metadata entry for each tracked file.
 
 This metadata must include, at minimum:
 - file_name
 - source_path
-- destination_path
+- destination_path when a destination target exists
 - archive_path
 - copied_at
 - size_bytes
@@ -148,8 +164,12 @@ This metadata must include, at minimum:
 - status
 - optional notes or conflict details
 - run_id
+- config_path
+- reports_path
 
 The metadata entry should be stored in JSON format for readability and future lookup.
+For a given tracked file, backup metadata shall keep only one current entry rather than accumulating duplicate entries for repeated syncs of the same file.
+If a file is synced again, the existing metadata entry for that file shall be updated with the latest run information instead of creating parallel duplicate entries for the same file.
 
 Backup is not intended to store duplicate file contents. It should only store what was copied, where it was copied, and when it was copied.
 The run_id must uniquely identify the sync execution so that rollback can target the exact run without deleting records from other executions.
@@ -200,6 +220,21 @@ The reporting surface shall present the data in clear sections for:
 - Rollback Status
 - Error Log
 
+The dashboard UI shall be a responsive web-based interface with the following layout and interaction requirements:
+- a header area that identifies ChronoSync and the currently selected device
+- a sidebar that supports runtime config loading through a file-picker and an explicit config path input
+- visible config context showing the loaded config path and reports path for the current session
+- a device selector that lets the user switch between available report folders without restarting the app
+- an Overview area that presents individual report summaries, key metrics, and the latest destination, backup, and archive state
+- a Trends area that visualizes prior non-rollback runs in chronological order
+- a History / Audit area that serves as the Details view for the full run history
+- a Rollback Status area that shows rollback events, outcomes, and timestamps
+- an Error Log area that shows file-level errors and their run_id linkage
+- graceful empty states and guidance when config, device, report, or error data is missing
+
+The Overview section shall contain only current snapshot and summary cards, while detailed historical records shall remain in the History / Audit section.
+The dashboard shall preserve the required reporting information architecture even when no historical non-rollback run is available.
+
 The Overview section shall provide the latest snapshot for the selected device and shall include the latest destination, backup, and archive state summaries for the current run.
 The Trends section shall show previous runs in chronological order so the user can compare operational changes over time.
 The History / Audit section shall show the full run history and audit trail, including prior runs and rollback lifecycle events.
@@ -211,12 +246,14 @@ It shall support saving:
 - JSON report
 - CSV error log
 
-Reports must be stored under a device-specific folder, such as:
-- reports/<device>/
+CSV and JSON report outputs must contain the same run values and summary fields to ensure consistency and parity between formats.
+
+Reports must be stored under the configured reports path in a device-specific folder, such as:
+- <reports_path>/<device>/
 
 ### 4.8 CLI
 The system shall provide a command-line interface with these options:
-- --config path/to/config.yaml
+- --config /any/path/to/config.yaml
 - --device device_name
 - --rollback run_id
 
@@ -227,6 +264,7 @@ Exactly one execution mode is required at a time:
 If neither sync nor rollback inputs are supplied, the system shall fail with a clear message.
 If the chosen config file does not exist, the system shall raise a file-not-found error.
 The rollback command must load the backup metadata for the target run_id, remove the destination and archive copies created by that run, and delete the matching metadata records without affecting other runs.
+When destination is not configured, rollback shall operate only on archive copies and metadata records for the target run.
 
 ### 4.9 Error Handling
 The system shall:
@@ -259,15 +297,18 @@ A YAML config file may include:
 ```
 mode: "incremental"
 source: "/path/to/source"
-destination: "/path/to/destination"
 backup: "/path/to/backup"
 archive: "/mnt/external_drive/archive"
+reports_path: "/path/to/reports"
 file_types:
   - ".mp3"
   - ".jpg"
   - ".png"
 devicename: "USB-Device"
+destination: "/path/to/destination"
 ```
+
+`destination` is optional. All other fields shown above are required unless the specification explicitly states otherwise.
 
 ### Report structure
 The report is a dictionary including string and numeric metrics, for example:
@@ -293,6 +334,8 @@ Each error record contains:
 - file name
 - target name
 - error message
+- run_id
+- config path
 
 ## 7. Edge Cases
 The implementation must handle these scenarios:
@@ -310,16 +353,20 @@ The implementation must handle these scenarios:
 ## 8. Acceptance Criteria
 The project is accepted when all of the following are true:
 1. It reads YAML config files successfully.
-2. It recursively processes source files matching configured extensions.
-3. It copies files to one or more configured targets.
-4. It supports both incremental and full sync modes.
-5. It safely handles conflicting existing files.
-6. It validates copies by hash comparison.
-7. It generates CSV and JSON reports with correct metrics.
-8. It writes per-file error entries.
-9. It exposes CLI behavior for config or device-based execution.
-10. Tests pass successfully.
-11. Test coverage is at least 90%.
+2. It accepts config files from arbitrary filesystem locations, not only project-local paths.
+3. It recursively processes source files matching configured extensions.
+4. It copies files to archive and, when configured, to destination.
+5. It supports both incremental and full sync modes.
+6. It safely handles conflicting existing files.
+7. It validates copies by hash comparison.
+8. It generates CSV and JSON reports with correct metrics under the configured reports path.
+9. It writes per-file error entries with run linkage.
+10. It maintains a single current backup metadata entry per tracked file.
+11. It exposes CLI behavior for config or device-based execution.
+12. It renders the dashboard UI with Overview, Trends, History / Audit, Rollback Status, and Error Log sections.
+13. It supports runtime config loading in the dashboard through a file-picker or explicit config path input.
+14. Tests pass successfully.
+15. Test coverage is at least 90%.
 
 ## 9. Test Plan
 ### Unit tests
