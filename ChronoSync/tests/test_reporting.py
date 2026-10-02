@@ -32,6 +32,7 @@ def test_generate_report_aggregates_source_and_dest_stats(tmp_path):
         "backup": str(backup_dir),
         "archive": str(archive_dir),
         "devicename": "USB-Device",
+        "reports_path": str(tmp_path / "reports"),
         "mode": "incremental",
         "file_types": [".mp3", ".txt"],
     }
@@ -54,7 +55,7 @@ def test_save_report_functions_write_expected_files(tmp_path, monkeypatch):
 
     save_report_csv(report, "demo")
     save_report_json(report, "demo")
-    save_error_log([("track.mp3", "destination", "copy failed")], "demo")
+    save_error_log([("track.mp3", "destination", "copy failed")], "demo", run_id="run-001", config_path="/tmp/demo.yaml")
 
     csv_path = tmp_path / "reports" / "demo" / "demo_backup_report.csv"
     json_path = tmp_path / "reports" / "demo" / "demo_backup_report.json"
@@ -74,9 +75,14 @@ def test_save_report_functions_write_expected_files(tmp_path, monkeypatch):
 
     with errors_path.open(newline="") as fh:
         rows = list(csv.reader(fh))
-        assert rows[1][1] == "track.mp3"
-        assert rows[1][2] == "destination"
-        assert "copy failed" in rows[1][3]
+        assert rows[0][0] == "Run Timestamp"
+        assert rows[0][1] == "run_id"
+        assert rows[0][2] == "Config Path"
+        assert rows[1][1] == "run-001"
+        assert rows[1][2] == "/tmp/demo.yaml"
+        assert rows[1][3] == "track.mp3"
+        assert rows[1][4] == "destination"
+        assert "copy failed" in rows[1][5]
 
 
 def test_save_report_csv_writes_header_for_empty_existing_file(tmp_path, monkeypatch):
@@ -103,7 +109,11 @@ def test_report_includes_run_id_and_matches_csv_json_fields(tmp_path, monkeypatc
         "run_id": "2024-01-01 00:00:00",
         "Run Timestamp": "2024-01-01 00:00:00",
         "Device": "demo",
+        "Config Path": "/tmp/demo.yaml",
+        "Reports Path": "/tmp/reports",
         "Mode": "full",
+        "Destination configured": "yes",
+        "Destination Path": "/tmp/destination",
         "Total files at destination": 5,
         "Destination total size (MB)": 12.0,
         "Total files at backup": 2,
@@ -140,6 +150,8 @@ def test_run_sync_generates_distinct_run_id_and_timestamp(tmp_path):
         "destination": str(tmp_path / "destination"),
         "backup": str(tmp_path / "backup"),
         "archive": str(tmp_path / "archive"),
+        "devicename": "demo",
+        "reports_path": str(tmp_path / "reports"),
         "file_types": [".mp3"],
         "mode": "full",
     }
@@ -200,12 +212,44 @@ def test_load_config_reads_yaml_file(tmp_path):
         "destination": str(dest_dir),
         "backup": str(backup_dir),
         "archive": str(archive_dir),
+        "devicename": "demo-device",
+        "reports_path": str(tmp_path / "reports"),
         "file_types": [".mp3"],
     }
     with config_path.open("w", encoding="utf-8") as fh:
         yaml.safe_dump(config, fh)
 
-    assert load_config(str(config_path)) == config
+    loaded = load_config(str(config_path))
+    for key, value in config.items():
+        assert loaded[key] == value
+    assert loaded["config_path"] == str(config_path.resolve())
+
+
+def test_load_config_resolves_relative_paths_from_config_location(tmp_path):
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    source_dir = config_dir / "source"
+    source_dir.mkdir()
+
+    config_path = config_dir / "device.yaml"
+    config = {
+        "mode": "full",
+        "source": "source",
+        "backup": "backup",
+        "archive": "archive",
+        "reports_path": "reports",
+        "devicename": "demo-device",
+        "file_types": [".mp3"],
+    }
+    with config_path.open("w", encoding="utf-8") as fh:
+        yaml.safe_dump(config, fh)
+
+    loaded = load_config(str(config_path))
+
+    assert loaded["source"] == str((config_dir / "source").resolve())
+    assert loaded["backup"] == str((config_dir / "backup").resolve())
+    assert loaded["archive"] == str((config_dir / "archive").resolve())
+    assert loaded["reports_path"] == str((config_dir / "reports").resolve())
 
 
 def test_resolve_config_path_prefers_explicit_runtime_file(tmp_path):
@@ -227,13 +271,18 @@ def test_validate_config_rejects_missing_or_invalid_required_fields(tmp_path):
     valid = {
         "mode": "incremental",
         "source": str(source_dir),
-        "destination": str(tmp_path / "dest"),
         "backup": str(tmp_path / "backup"),
         "archive": str(tmp_path / "archive"),
+        "devicename": "demo-device",
+        "reports_path": str(tmp_path / "reports"),
         "file_types": [".mp3"],
     }
 
     assert validate_config(valid) == valid
+
+    valid_with_destination = dict(valid)
+    valid_with_destination["destination"] = str(tmp_path / "dest")
+    assert validate_config(valid_with_destination) == valid_with_destination
 
     invalid_missing = dict(valid)
     invalid_missing.pop("mode")
@@ -259,6 +308,14 @@ def test_validate_config_rejects_missing_or_invalid_required_fields(tmp_path):
     except ValueError:
         pass
 
+    invalid_reports = dict(valid)
+    invalid_reports.pop("reports_path")
+    try:
+        validate_config(invalid_reports)
+        assert False, "Expected ValueError for missing reports_path"
+    except ValueError:
+        pass
+
 
 def test_backup_sync_main_reads_config_and_saves_reports(tmp_path, monkeypatch):
     source_dir = tmp_path / "source"
@@ -273,6 +330,7 @@ def test_backup_sync_main_reads_config_and_saves_reports(tmp_path, monkeypatch):
         "destination": str(dest_dir),
         "backup": str(tmp_path / "backup"),
         "archive": str(tmp_path / "archive"),
+        "reports_path": str(tmp_path / "reports_out"),
         "file_types": [".mp3"],
     }
 
@@ -285,6 +343,6 @@ def test_backup_sync_main_reads_config_and_saves_reports(tmp_path, monkeypatch):
 
     backup_sync.main()
 
-    report_file = tmp_path / "reports" / "demo-device" / "demo-device_backup_report.csv"
+    report_file = tmp_path / "reports_out" / "demo-device" / "demo-device_backup_report.csv"
     assert report_file.exists()
     assert (dest_dir / "track.mp3").exists()

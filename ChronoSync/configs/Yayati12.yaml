@@ -4,6 +4,7 @@ source: "F:/PhoneStorage"
 destination: "E:/Backups/Phone01/destination"
 backup: "E:/Backups/Phone01/backup"
 archive: "E:/Backups/Phone01/archive"
+reports_path: "E:/Backups/Phone01/reports"
 file_types:
   - ".mp4"
   - ".jpg"

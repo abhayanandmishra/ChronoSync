@@ -60,6 +60,11 @@ The system shall load a YAML config file containing runtime settings such as:
 - devicename
 - reports_path
 
+The system shall also maintain a persistent device-to-config registry in the user directory at ~/.chronosync/config. This registry shall store key-value mappings from device name to config file path and shall preserve entries for devices that are added for the first time as well as later updates.
+
+The system shall keep a backup copy of the saved registry on a separate backup drive or backup location chosen by the user so that device mappings can be restored if the active registry is missing, damaged, or deleted.
+If a backup drive or backup location was already provided during the last application load, the system shall reuse that remembered location and shall not ask for it again unless the user changes or clears it.
+
 The system shall:
 - validate required configuration keys before performing any file operation
 - require these keys: mode, source, backup, archive, file_types, devicename, reports_path
@@ -72,11 +77,15 @@ The system shall:
 - ensure file_types is a non-empty list of extensions such as .mp3, .jpg, .png
 - require `reports_path` as the base location where report and error files are written
 - store report output under a device-specific folder inside `reports_path`, such as `<reports_path>/<device>/`
+- on application load, prompt the user to use the saved device config registry, restore it from backup, choose or confirm the backup drive location, or load a different config file
+- on application load, reuse a previously provided backup drive location without prompting again unless the user changes or clears it
+- when the application closes, persist the current registry to the selected backup drive or backup location
 - read YAML safely using standard parsing methods
 - raise clear exceptions when required values are missing or invalid
 
 The runtime interface shall allow the user to provide the config file location explicitly, such as `--config /any/path/to/config.yaml`, and the config file is not required to live inside the ChronoSync project tree.
 The dashboard or UI shall also support loading a config file at runtime through a file-picker or a dedicated “Load Config” action so the user can select a YAML file without restarting the app or relying only on default discovery.
+The dashboard or UI shall expose Save and Delete actions for the active device configuration entry, and it shall be able to restore the registry from its backup copy when the primary registry is unavailable.
 If no explicit config path is provided, the system may resolve the config from the default project locations or the current device context as defined by the application behavior.
 If destination is omitted, the system shall still run using archive and backup metadata flows, and reporting must clearly indicate that no destination target was configured for that run.
 

@@ -15,12 +15,14 @@ Implement the ChronoSync Python backup and synchronization utility described by 
 ## Implementation scope
 Build the behaviors required by the current product specification, including:
 - YAML configuration loading and required-field validation
-- support for an optional `reports_path` in config for overriding default report output location
-- explicit config-location support via CLI config path resolution and runtime dashboard config loading through a file picker or load-config action
+- persistent device-config registry handling under ~/.chronosync/config, including save/update/delete behavior and registry backup restore support on a separate backup drive or backup location
+- required `reports_path` handling in config for report and error output including validation of path existence, writability, and proper permissions
+- explicit config-location support via CLI config path resolution and runtime dashboard config loading through a file picker or load-config action, including config files outside the project tree
+- load-time handling for the saved device registry so the application can prompt for whether to use stored mappings, restore from backup, choose the backup drive location, or load a different config, while reusing a previously provided backup location without asking again unless it changes
 - recursive matching of source files
 - incremental and full sync logic
-- safe copy behavior with conflict handling
-- metadata-only backup records
+- archive-first copy behavior with optional destination sync and conflict handling
+- metadata-only backup records with a single current entry per tracked file
 - archive as the persisted copy location
 - hash-based validation and integrity checks
 - destination purge modes: single-file, multi-file, and full purge
@@ -29,9 +31,11 @@ Build the behaviors required by the current product specification, including:
 - rollback status and report integrity: when a run is rolled back, the report entry must be marked with status = "rollback" and remain auditable even if backup metadata is cleaned up
 - report handling for not_found rollback attempts without mutating unrelated run history
 - per-run metadata and report generation
+- propagation of config path and reports path into operational metadata and report context
 - structured dashboard/reporting sections: Overview, Trends, History / Audit, Rollback Status, and Error Log
+- responsive dashboard UI with sidebar config loading, device selection, overview cards, trends charts, history/audit tables, rollback summary, and error log views
 - overview-level destination, backup, and archive state summaries for the latest run
-- audit/history view for previous runs and lifecycle events
+- details/history view for previous runs and lifecycle events
 - rollback by run_id
 - CLI support for config, device, rollback, purge, and archive restore flows
 - resilient logging for per-file failures
@@ -53,9 +57,12 @@ Use a modular layout similar to:
 - Separate config, sync, validation, reporting, and utility logic.
 - Do not invent new product behavior not defined in [spec.md](spec.md).
 - Treat [spec.md](spec.md) as the contract and implement only what it requires.
-- Keep CSV and JSON outputs aligned with the same run values and summary fields.
-- Preserve the reporting structure defined by the current specification: Summary, Individual Reports, History, and Error Log.
+- Keep report output rooted under the configured `reports_path` in a device-specific folder such as `<reports_path>/<device>/`.
+- Preserve the reporting structure defined by the current specification: Overview, Trends, History / Audit, Rollback Status, and Error Log.
+- Keep the dashboard layout consistent with the product spec: the Overview area contains summary cards, while History / Audit is the detailed records view.
 - Keep backup metadata metadata-only and avoid duplicating file content.
+- Keep destination handling optional without degrading archive, rollback, purge, reporting, or dashboard behavior.
+- Keep one current metadata entry per tracked file instead of accumulating duplicate backup entries for repeated syncs of the same file.
 - Keep rollback isolated and keyed by run_id.
 
 ## Final instruction

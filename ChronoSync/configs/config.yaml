@@ -1,8 +1,10 @@
+devicename: "sample-device"
 mode: "incremental"   # options: "incremental" or "full"
 source: "/path/to/source"
 destination: "/path/to/destination"
 backup: "/path/to/backup"
 archive: "/mnt/external_drive/archive"
+reports_path: "/path/to/reports"
 file_types:
   - ".mp3"
   - ".jpg"
