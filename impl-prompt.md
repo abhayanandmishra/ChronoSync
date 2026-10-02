@@ -17,7 +17,7 @@ Build the behaviors required by the current product specification, including:
 - YAML configuration loading and required-field validation
 - persistent device-config registry handling under ~/.chronosync/config, including save/update/delete behavior and registry backup restore support on a separate backup drive or backup location
 - required `reports_path` handling in config for report and error output including validation of path existence, writability, and proper permissions
-- explicit config-location support via CLI config path resolution and runtime dashboard config loading through a file picker or load-config action, including config files outside the project tree
+- explicit config-location support via CLI config path resolution and runtime dashboard config loading through explicit file paths or saved registry entries, including config files outside the project tree
 - read-only first display for loaded config details in the dashboard, with an adjacent Edit/Update action that can modify and save the loaded config when needed
 - load-time handling for the saved device registry so the application can prompt for whether to use stored mappings, restore from backup, choose the backup drive location, or load a different config, while reusing a previously provided backup location without asking again unless it changes
 - recursive matching of source files

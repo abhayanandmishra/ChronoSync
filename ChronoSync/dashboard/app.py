@@ -41,17 +41,7 @@ def resolve_config_path(explicit_path=None):
     return None
 
 
-def load_config_file(config_path=None, uploaded_file=None):
-    if uploaded_file is not None:
-        contents = uploaded_file.read() if hasattr(uploaded_file, "read") else uploaded_file
-        try:
-            config = yaml.safe_load(contents) or {}
-            if isinstance(config, dict):
-                config["config_path"] = "<uploaded>"
-            return config
-        except yaml.YAMLError:
-            return {}
-
+def load_config_file(config_path=None):
     resolved_path = resolve_config_path(config_path)
     if resolved_path is None:
         return {}
@@ -143,6 +133,24 @@ def render_metric_grid(metrics):
         col.metric(label, value)
 
 
+def render_metric_grid_compact(metrics, compact_labels=None):
+    compact_labels = set(compact_labels or [])
+    cols = st.columns(len(metrics))
+    for col, (label, value) in zip(cols, metrics.items()):
+        if label in compact_labels:
+            col.markdown(
+                f"""
+                <div class='card metric-card-compact'>
+                    <div class='card-label metric-label-compact'>{label}</div>
+                    <div class='card-value metric-value-compact'>{value}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            col.metric(label, value)
+
+
 def render_key_value_grid(title, data):
     st.markdown(f"<div class='section-header'><h2>{title}</h2></div>", unsafe_allow_html=True)
     cols = st.columns(3)
@@ -214,6 +222,9 @@ def main():
         }
         .card-label { color: #6b7280; font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
         .card-value { color: #111827; font-size: 1.05rem; font-weight: 700; margin-top: 0.35rem; }
+        .metric-card-compact { padding: 0.7rem 0.85rem 0.6rem; }
+        .metric-label-compact { font-size: 0.72rem; }
+        .metric-value-compact { font-size: 0.88rem; margin-top: 0.25rem; }
         .subtle { color: #6b7280; }
         div[data-testid='stMetric'] {
             background: #fff;
@@ -277,7 +288,7 @@ def main():
         st.markdown("---")
         load_mode = st.radio(
             "Load config source",
-            options=["Saved registry", "Config file"],
+            options=["Saved registry", "Config file path"],
             index=0 if registry_entries else 1,
             horizontal=False,
             key="config_load_mode",
@@ -297,8 +308,7 @@ def main():
             else:
                 st.warning("No saved registry entries were found. Load a config file to create one.")
 
-        if load_mode == "Config file":
-            uploaded_config = st.file_uploader("Load Config", type=["yaml", "yml"], key="config_loader")
+        if load_mode == "Config file path":
             default_path = resolve_config_path()
             custom_path = st.text_input(
                 "Config path",
@@ -307,9 +317,7 @@ def main():
                 help="Load a specific config file at runtime without restarting the app.",
             )
 
-            if uploaded_config is not None:
-                loaded_config = load_config_file(uploaded_file=uploaded_config)
-            elif custom_path.strip():
+            if custom_path.strip():
                 loaded_config = load_config_file(config_path=custom_path.strip())
             else:
                 loaded_config = load_config_file()
@@ -348,43 +356,40 @@ def main():
             key="config_yaml_preview",
         )
 
-        if current_config_path == "<uploaded>":
-            st.caption("Editing is available only for config files loaded from a path.")
+        if not st.session_state.get("config_edit_mode", False):
+            if st.button("Edit/Update config"):
+                st.session_state["config_edit_mode"] = True
+                st.session_state["config_yaml_editor"] = st.session_state.get("config_yaml_text", config_to_yaml_text(loaded_config))
+                st.rerun()
         else:
-            if not st.session_state.get("config_edit_mode", False):
-                if st.button("Edit/Update config"):
-                    st.session_state["config_edit_mode"] = True
-                    st.session_state["config_yaml_editor"] = st.session_state.get("config_yaml_text", config_to_yaml_text(loaded_config))
-                    st.rerun()
-            else:
-                st.text_area(
-                    "Edit config YAML",
-                    key="config_yaml_editor",
-                    height=260,
-                    label_visibility="collapsed",
-                )
-                edit_cols = st.columns(2)
-                with edit_cols[0]:
-                    if st.button("Save updated config"):
-                        try:
-                            updated_config = save_loaded_config(current_config_path, st.session_state.get("config_yaml_editor", ""))
-                        except (OSError, ValueError, yaml.YAMLError) as exc:
-                            st.error(f"Unable to save config: {exc}")
-                        else:
-                            st.session_state["config_edit_mode"] = False
-                            st.session_state["config_yaml_text"] = config_to_yaml_text(updated_config)
-                            st.session_state["config_yaml_editor"] = st.session_state["config_yaml_text"]
-                            st.success("Config saved.")
-                            st.rerun()
-                with edit_cols[1]:
-                    if st.button("Cancel edit"):
+            st.text_area(
+                "Edit config YAML",
+                key="config_yaml_editor",
+                height=260,
+                label_visibility="collapsed",
+            )
+            edit_cols = st.columns(2)
+            with edit_cols[0]:
+                if st.button("Save updated config"):
+                    try:
+                        updated_config = save_loaded_config(current_config_path, st.session_state.get("config_yaml_editor", ""))
+                    except (OSError, ValueError, yaml.YAMLError) as exc:
+                        st.error(f"Unable to save config: {exc}")
+                    else:
                         st.session_state["config_edit_mode"] = False
-                        st.session_state.pop("config_yaml_editor", None)
+                        st.session_state["config_yaml_text"] = config_to_yaml_text(updated_config)
+                        st.session_state["config_yaml_editor"] = st.session_state["config_yaml_text"]
+                        st.success("Config saved.")
                         st.rerun()
+            with edit_cols[1]:
+                if st.button("Cancel edit"):
+                    st.session_state["config_edit_mode"] = False
+                    st.session_state.pop("config_yaml_editor", None)
+                    st.rerun()
 
         action_cols = st.columns(2)
         config_path_value = loaded_config.get("config_path", "")
-        can_save_registry = bool(config_path_value and config_path_value != "<uploaded>" and loaded_config.get("devicename"))
+        can_save_registry = bool(config_path_value and loaded_config.get("devicename"))
         if can_save_registry:
             with action_cols[0]:
                 if st.button("Save device config"):
@@ -458,7 +463,7 @@ def main():
             "Files Copied": latest.get("Files copied this run", 0),
             "Validated": latest.get("Files validated (hash match)", 0),
         }
-        render_metric_grid(snapshot_metrics)
+        render_metric_grid_compact(snapshot_metrics, compact_labels={"Run ID", "Timestamp", "Status"})
 
         render_key_value_grid(
             "Current State",
@@ -488,7 +493,7 @@ def main():
                 "Conflicts Resolved": latest.get("Conflicts resolved (hash-suffixed alternative copies)", latest.get("Conflicts resolved (timestamped backup)", 0)),
                 "Errors": latest.get("Errors this run", 0),
             }
-            render_metric_grid(overview_summary)
+            render_metric_grid_compact(overview_summary, compact_labels={"Run ID", "Timestamp", "Status"})
             render_key_value_grid(
                 "Overview Details",
                 {

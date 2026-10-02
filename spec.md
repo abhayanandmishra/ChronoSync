@@ -84,7 +84,7 @@ The system shall:
 - raise clear exceptions when required values are missing or invalid
 
 The runtime interface shall allow the user to provide the config file location explicitly, such as `--config /any/path/to/config.yaml`, and the config file is not required to live inside the ChronoSync project tree.
-The dashboard or UI shall also support loading a config file at runtime through a file-picker or a dedicated “Load Config” action so the user can select a YAML file without restarting the app or relying only on default discovery.
+The dashboard or UI shall support loading a config file at runtime through an explicit file path or saved registry entry so the user can select a YAML file without restarting the app or relying only on default discovery.
 When a config file is loaded, the dashboard or UI shall show its details in a read-only state first, and it shall provide an adjacent Edit/Update action that lets the user modify the loaded config and save the changes when needed.
 The dashboard or UI shall expose Save and Delete actions for the active device configuration entry, and it shall be able to restore the registry from its backup copy when the primary registry is unavailable.
 If no explicit config path is provided, the system may resolve the config from the default project locations or the current device context as defined by the application behavior.
