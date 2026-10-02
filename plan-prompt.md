@@ -18,11 +18,13 @@ Use this prompt when the team needs to revise product scope, clarify behavior, a
 3. Keep the wording clear, testable, and product-focused.
 4. Preserve reporting/dashboard structure requirements such as Overview, Trends, History / Audit, Rollback Status, and Error Log where relevant.
 5. Add config-level requirements for a `reports_path` (or equivalent) option so the reporting output location is explicitly configurable in YAML.
-6. Clarify that the config file location may be supplied explicitly through the runtime interface, such as `--config path/to/config.yaml`, and that the dashboard should also support loading a config file at runtime through a file-picker or “Load Config” action while device-based or default resolution remains supported when appropriate.
-7. Ensure the dashboard layout reflects the intended information architecture: individual report summaries belong in the Overview section, while the Details area is treated as the History / Audit view.
-8. Do not add implementation details, code, CLI behavior, or engineering decisions here beyond the product contract itself.
-8. Do not treat this file as the canonical requirement document.
-9. After the spec changes, update [impl-prompt.md](impl-prompt.md) to match the new requirement set.
+6. Include persistent device-config registry behavior in the spec, including a registry backup stored on a separate backup drive chosen at load time, a startup/load-time prompt that lets the user confirm or choose that backup location, remembered backup-drive reuse so the user is not prompted again when a location was already provided, and save-on-exit behavior so the registry is written to the backup drive when the application closes.
+7. Add dashboard behavior so a loaded config is shown read-only first and the UI provides an adjacent Edit/Update action to modify and save the loaded config when needed.
+8. Remove upload-based config loading from the spec so config selection is limited to explicit file paths and saved registry entries.
+9. Ensure the dashboard layout reflects the intended information architecture: individual report summaries belong in the Overview section, while the Details area is treated as the History / Audit view.
+10. Do not add implementation details, code, CLI behavior, or engineering decisions here beyond the product contract itself.
+11. Do not treat this file as the canonical requirement document.
+12. After the spec changes, update [impl-prompt.md](impl-prompt.md) to match the new requirement set.
 
 ## Mandatory constraint
 This prompt must never become the authoritative requirement source.

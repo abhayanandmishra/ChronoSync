@@ -50,14 +50,13 @@ def write_backup_metadata(config, src_path, file, archive_path, mode, status, de
     if "backup" not in config:
         return
 
-    if destination_path is None and "destination" in config:
+    if destination_path is None and config.get("destination"):
         destination_path = os.path.join(config["destination"], file)
 
     source_size = os.path.getsize(src_path) if os.path.exists(src_path) else 0
     entry = {
         "file_name": file,
         "source_path": src_path,
-        "destination_path": destination_path,
         "archive_path": archive_path,
         "copied_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "source_size_mb": round(source_size / (1024 * 1024), 2),
@@ -66,6 +65,8 @@ def write_backup_metadata(config, src_path, file, archive_path, mode, status, de
         "sync_mode": mode,
         "status": status,
     }
+    if destination_path:
+        entry["destination_path"] = destination_path
     save_backup_metadata(config, entry)
 
 
@@ -77,7 +78,7 @@ def process_file(src_path, file, config, timestamp, mode):
     copied = 0
 
     targets = []
-    if "destination" in config:
+    if config.get("destination"):
         targets.append(("destination", os.path.join(config["destination"], file)))
     if "archive" in config:
         targets.append(("archive", os.path.join(config["archive"], file)))
@@ -245,4 +246,293 @@ def run_sync(config, max_workers=4):
 
     report = generate_report(config, copied_count, validated_count, skipped_count, conflict_count, all_errors)
     return report, all_errors
+
+
+def purge_destination(config, action_type, run_id=None, file_paths=None, force_overwrite=False):
+    """Purge destination files and record actions."""
+    backup_dir = config.get("backup")
+    if not backup_dir:
+        return {"success": False, "message": "No backup directory configured."}
+
+    os.makedirs(backup_dir, exist_ok=True)
+    purge_log_path = os.path.join(backup_dir, "purge_actions.json")
+    purge_actions = []
+
+    if os.path.exists(purge_log_path):
+        with open(purge_log_path, "r", encoding="utf-8") as f:
+            try:
+                purge_actions = json.load(f)
+            except json.JSONDecodeError:
+                purge_actions = []
+
+    if not isinstance(purge_actions, list):
+        purge_actions = []
+
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    deleted_count = 0
+    missing_count = 0
+    error_count = 0
+    errors = []
+
+    if action_type == "single" and file_paths:
+        # Single file purge
+        file_path = file_paths[0] if isinstance(file_paths, list) else file_paths
+        action = {
+            "file_name": os.path.basename(file_path),
+            "run_id": run_id or "manual",
+            "action_type": "single",
+            "timestamp": timestamp,
+            "deleted_path": file_path,
+            "status": "deleted" if os.path.exists(file_path) else "missing"
+        }
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                deleted_count += 1
+                action["status"] = "deleted"
+            except OSError as e:
+                action["status"] = "error"
+                action["error_details"] = str(e)
+                error_count += 1
+                errors.append({"file": action["file_name"], "error": str(e)})
+        else:
+            missing_count += 1
+            action["status"] = "missing"
+        purge_actions.append(action)
+
+    elif action_type == "multi" and file_paths:
+        # Multi-file purge
+        for file_path in file_paths:
+            action = {
+                "file_name": os.path.basename(file_path),
+                "run_id": run_id or "manual",
+                "action_type": "multi",
+                "timestamp": timestamp,
+                "deleted_path": file_path,
+                "status": "deleted" if os.path.exists(file_path) else "missing"
+            }
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                    deleted_count += 1
+                    action["status"] = "deleted"
+                except OSError as e:
+                    action["status"] = "error"
+                    action["error_details"] = str(e)
+                    error_count += 1
+                    errors.append({"file": action["file_name"], "error": str(e)})
+            else:
+                missing_count += 1
+                action["status"] = "missing"
+            purge_actions.append(action)
+
+    elif action_type == "full_all" or (action_type == "full_run" and run_id):
+        # Full purge by run_id or all
+        metadata_path = os.path.join(backup_dir, "backup_metadata.json")
+        if os.path.exists(metadata_path):
+            with open(metadata_path, "r", encoding="utf-8") as f:
+                try:
+                    records = json.load(f)
+                except json.JSONDecodeError:
+                    records = []
+
+            if not isinstance(records, list):
+                records = [records] if isinstance(records, dict) else []
+
+            for record in records:
+                if not isinstance(record, dict):
+                    continue
+                
+                if action_type == "full_all" or record.get("run_id") == run_id:
+                    dest_path = record.get("destination_path")
+                    if dest_path:
+                        action = {
+                            "file_name": record.get("file_name", os.path.basename(dest_path)),
+                            "run_id": record.get("run_id", run_id),
+                            "action_type": action_type,
+                            "timestamp": timestamp,
+                            "deleted_path": dest_path,
+                            "status": "deleted" if os.path.exists(dest_path) else "missing"
+                        }
+                        if os.path.exists(dest_path):
+                            try:
+                                os.remove(dest_path)
+                                deleted_count += 1
+                                action["status"] = "deleted"
+                            except OSError as e:
+                                action["status"] = "error"
+                                action["error_details"] = str(e)
+                                error_count += 1
+                                errors.append({"file": action["file_name"], "error": str(e)})
+                        else:
+                            missing_count += 1
+                            action["status"] = "missing"
+                        purge_actions.append(action)
+
+    with open(purge_log_path, "w", encoding="utf-8") as f:
+        json.dump(purge_actions, f, indent=4)
+
+    return {
+        "success": True,
+        "message": f"Purge completed: {deleted_count} deleted, {missing_count} missing, {error_count} errors.",
+        "deleted": deleted_count,
+        "missing": missing_count,
+        "errors": errors
+    }
+
+
+def restore_archive(config, action_type, run_id=None, file_paths=None, force_restore=False):
+    """Restore files from archive to destination with conflict detection."""
+    backup_dir = config.get("backup")
+    if not backup_dir:
+        return {"success": False, "message": "No backup directory configured."}
+
+    metadata_path = os.path.join(backup_dir, "backup_metadata.json")
+    if not os.path.exists(metadata_path):
+        return {"success": False, "message": "No backup metadata found."}
+
+    with open(metadata_path, "r", encoding="utf-8") as f:
+        try:
+            records = json.load(f)
+        except json.JSONDecodeError:
+            return {"success": False, "message": "Backup metadata is invalid."}
+
+    if not isinstance(records, list):
+        records = [records] if isinstance(records, dict) else []
+
+    restored_count = 0
+    skipped_count = 0
+    conflict_count = 0
+    errors = []
+
+    def resolve_destination_path(record):
+        destination_path = record.get("destination_path")
+        if destination_path:
+            return destination_path
+
+        configured_destination = config.get("destination")
+        file_name = record.get("file_name")
+        if configured_destination and file_name:
+            return os.path.join(configured_destination, file_name)
+
+        return None
+
+    if action_type == "single" and file_paths:
+        # Single file restore
+        file_path = file_paths[0] if isinstance(file_paths, list) else file_paths
+        matching_record = None
+        for record in records:
+            if isinstance(record, dict) and record.get("archive_path") == file_path:
+                matching_record = record
+                break
+
+        if matching_record:
+            archive_path = matching_record.get("archive_path")
+            dest_path = resolve_destination_path(matching_record)
+            archive_hash = matching_record.get("sha256")
+
+            if not dest_path:
+                errors.append({"file": matching_record.get("file_name") or os.path.basename(archive_path), "error": "destination_not_configured"})
+            elif os.path.exists(archive_path):
+                if not os.path.exists(dest_path):
+                    try:
+                        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                        shutil.copy2(archive_path, dest_path)
+                        restored_count += 1
+                    except OSError as e:
+                        errors.append({"file": os.path.basename(archive_path), "error": str(e)})
+                else:
+                    dest_hash = file_hash(dest_path) if os.path.exists(dest_path) else None
+                    if dest_hash == archive_hash:
+                        skipped_count += 1
+                    elif force_restore:
+                        try:
+                            shutil.copy2(archive_path, dest_path)
+                            restored_count += 1
+                        except OSError as e:
+                            errors.append({"file": os.path.basename(archive_path), "error": str(e)})
+                    else:
+                        conflict_count += 1
+                        errors.append({"file": os.path.basename(archive_path), "error": "conflict_skipped"})
+
+    elif action_type == "multi" and file_paths:
+        # Multi-file restore
+        for file_path in file_paths:
+            matching_record = None
+            for record in records:
+                if isinstance(record, dict) and record.get("archive_path") == file_path:
+                    matching_record = record
+                    break
+
+            if matching_record:
+                archive_path = matching_record.get("archive_path")
+                dest_path = resolve_destination_path(matching_record)
+                archive_hash = matching_record.get("sha256")
+
+                if not dest_path:
+                    errors.append({"file": matching_record.get("file_name") or os.path.basename(archive_path), "error": "destination_not_configured"})
+                elif os.path.exists(archive_path):
+                    if not os.path.exists(dest_path):
+                        try:
+                            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                            shutil.copy2(archive_path, dest_path)
+                            restored_count += 1
+                        except OSError as e:
+                            errors.append({"file": os.path.basename(archive_path), "error": str(e)})
+                    else:
+                        dest_hash = file_hash(dest_path) if os.path.exists(dest_path) else None
+                        if dest_hash == archive_hash:
+                            skipped_count += 1
+                        elif force_restore:
+                            try:
+                                shutil.copy2(archive_path, dest_path)
+                                restored_count += 1
+                            except OSError as e:
+                                errors.append({"file": os.path.basename(archive_path), "error": str(e)})
+                        else:
+                            conflict_count += 1
+                            errors.append({"file": os.path.basename(archive_path), "error": "conflict_skipped"})
+
+    elif action_type == "run" and run_id:
+        # Run-based restore
+        for record in records:
+            if not isinstance(record, dict) or record.get("run_id") != run_id:
+                continue
+
+            archive_path = record.get("archive_path")
+            dest_path = resolve_destination_path(record)
+            archive_hash = record.get("sha256")
+
+            if not dest_path:
+                errors.append({"file": record.get("file_name"), "error": "destination_not_configured"})
+            elif os.path.exists(archive_path):
+                if not os.path.exists(dest_path):
+                    try:
+                        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                        shutil.copy2(archive_path, dest_path)
+                        restored_count += 1
+                    except OSError as e:
+                        errors.append({"file": record.get("file_name"), "error": str(e)})
+                else:
+                    dest_hash = file_hash(dest_path) if os.path.exists(dest_path) else None
+                    if dest_hash == archive_hash:
+                        skipped_count += 1
+                    elif force_restore:
+                        try:
+                            shutil.copy2(archive_path, dest_path)
+                            restored_count += 1
+                        except OSError as e:
+                            errors.append({"file": record.get("file_name"), "error": str(e)})
+                    else:
+                        conflict_count += 1
+                        errors.append({"file": record.get("file_name"), "error": "conflict_skipped"})
+
+    return {
+        "success": True,
+        "message": f"Restore completed: {restored_count} restored, {skipped_count} skipped, {conflict_count} conflicts.",
+        "restored": restored_count,
+        "skipped": skipped_count,
+        "conflicts": conflict_count,
+        "errors": errors
+    }
 

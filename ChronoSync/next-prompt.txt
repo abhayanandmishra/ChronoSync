@@ -1,9 +1,0 @@
-
-#attachment:plan-prompt.md flow 1 - from source file1 is copied to destination, backup (metadata) and archive.
-flow 2 - file 1 is removed from destination purposely. backup will still have its metadata with status deleted. archive no change, file will keep on existing.
-
-there should be sync between destination, backup (metadata) and archive.
-
-
-#plan-prompt.md when this rollback happened, it is removing entries from backup_metadata.json file, but all other reports entries are already there which is confusing. correct
-so if rollback for particular run_id happened, add status in report as rollback 

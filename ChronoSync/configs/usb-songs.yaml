@@ -4,5 +4,6 @@ source: "E:\\pdrive\\songstomove"
 destination: "E:\\pdrive\\songstomove2"
 backup: "E:\\pdrive\\backup"
 archive: "E:\\pdrive\\archive"
+reports_path: "E:\\pdrive\\reports"
 file_types:
   - ".mp3"

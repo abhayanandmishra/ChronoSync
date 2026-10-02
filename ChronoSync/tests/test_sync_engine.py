@@ -65,6 +65,8 @@ def test_process_file_handles_full_sync_and_skips_up_to_date_file(tmp_path):
     config = {
         "destination": str(dest_dir),
         "archive": str(archive_dir),
+        "backup": str(tmp_path / "backup"),
+        "reports_path": str(tmp_path / "reports"),
         "file_types": [".mp3"],
         "mode": "full",
     }
@@ -102,6 +104,8 @@ def test_run_sync_copies_destination_and_tracks_conflicts(tmp_path):
         "destination": str(destination_dir),
         "backup": str(backup_dir),
         "archive": str(archive_dir),
+        "devicename": "demo-device",
+        "reports_path": str(tmp_path / "reports"),
         "file_types": [".mp3"],
         "mode": "full",
     }
@@ -149,6 +153,8 @@ def test_process_file_skips_when_existing_target_hash_matches(tmp_path):
     config = {
         "destination": str(destination_dir),
         "archive": str(archive_dir),
+        "backup": str(tmp_path / "backup"),
+        "reports_path": str(tmp_path / "reports"),
         "file_types": [".mp3"],
         "mode": "full",
     }
@@ -179,6 +185,7 @@ def test_process_file_creates_archive_when_destination_already_matches(tmp_path)
         "destination": str(destination_dir),
         "archive": str(archive_dir),
         "backup": str(tmp_path / "backup"),
+        "reports_path": str(tmp_path / "reports"),
         "file_types": [".mp3"],
         "mode": "incremental",
     }
@@ -206,6 +213,8 @@ def test_run_sync_does_not_emit_tqdm_deprecation_warning(tmp_path):
         "destination": str(tmp_path / "destination"),
         "backup": str(tmp_path / "backup"),
         "archive": str(tmp_path / "archive"),
+        "devicename": "demo-device",
+        "reports_path": str(tmp_path / "reports"),
         "file_types": [".mp3"],
         "mode": "full",
     }
@@ -261,6 +270,8 @@ def test_rollback_run_removes_matching_files_and_metadata(tmp_path):
         "destination": str(dest_dir),
         "archive": str(archive_dir),
         "backup": str(backup_dir),
+        "devicename": "demo",
+        "reports_path": str(tmp_path / "reports"),
         "file_types": [".mp3"],
         "mode": "incremental",
     }
@@ -345,6 +356,7 @@ def test_rollback_run_marks_report_status_as_rollback_without_removing_history(t
         "archive": str(archive_dir),
         "backup": str(backup_dir),
         "devicename": "demo",
+        "reports_path": str(tmp_path / "reports"),
         "file_types": [".mp3"],
         "mode": "incremental",
     }
@@ -363,7 +375,7 @@ def test_rollback_run_marks_report_status_as_rollback_without_removing_history(t
 
 
 def test_save_backup_metadata_does_not_duplicate_existing_entries(tmp_path):
-    config = {"backup": str(tmp_path)}
+    config = {"backup": str(tmp_path), "reports_path": str(tmp_path / "reports"), "config_path": "/tmp/config.yaml", "run_id": "run-001"}
     entry = {
         "file_name": "song.mp3",
         "source_path": "src/song.mp3",
@@ -377,8 +389,311 @@ def test_save_backup_metadata_does_not_duplicate_existing_entries(tmp_path):
     }
 
     save_backup_metadata(config, entry)
-    save_backup_metadata(config, entry)
+    updated_entry = dict(entry)
+    updated_entry["sha256"] = "def456"
+    updated_entry["status"] = "validated"
+    config["run_id"] = "run-002"
+    save_backup_metadata(config, updated_entry)
 
     payload = __import__("json").loads((tmp_path / "backup_metadata.json").read_text(encoding="utf-8"))
     assert len(payload) == 1
     assert payload[0]["file_name"] == "song.mp3"
+    assert payload[0]["sha256"] == "def456"
+    assert payload[0]["run_id"] == "run-002"
+    assert payload[0]["config_path"] == "/tmp/config.yaml"
+
+
+def test_run_sync_supports_archive_only_when_destination_is_omitted(tmp_path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    src = source_dir / "song.mp3"
+    src.write_bytes(b"song-bytes")
+
+    archive_dir = tmp_path / "archive"
+    backup_dir = tmp_path / "backup"
+    config = {
+        "source": str(source_dir),
+        "backup": str(backup_dir),
+        "archive": str(archive_dir),
+        "devicename": "archive-only",
+        "reports_path": str(tmp_path / "reports"),
+        "file_types": [".mp3"],
+        "mode": "full",
+    }
+
+    report, errors = run_sync(config, max_workers=1)
+
+    assert errors == []
+    assert report["Destination configured"] == "no"
+    assert report["Destination Path"] == "(not configured)"
+    assert report["Total files at destination"] == 0
+    assert (archive_dir / src.name).exists()
+    assert not (tmp_path / "destination" / src.name).exists()
+
+
+def test_purge_destination_single_file(tmp_path):
+    from core.sync_engine import purge_destination
+    
+    source_dir = tmp_path / "source"
+    dest_dir = tmp_path / "destination"
+    backup_dir = tmp_path / "backup"
+    for path in (source_dir, dest_dir, backup_dir):
+        path.mkdir(parents=True, exist_ok=True)
+    
+    file_path = dest_dir / "song.mp3"
+    file_path.write_bytes(b"song-data")
+    
+    config = {
+        "destination": str(dest_dir),
+        "backup": str(backup_dir),
+        "file_types": [".mp3"],
+    }
+    
+    result = purge_destination(config, "single", run_id="run-123", file_paths=[str(file_path)])
+    
+    assert result["success"] is True
+    assert result["deleted"] == 1
+    assert not file_path.exists()
+    
+    purge_log = backup_dir / "purge_actions.json"
+    assert purge_log.exists()
+    actions = json.loads(purge_log.read_text(encoding="utf-8"))
+    assert len(actions) == 1
+    assert actions[0]["file_name"] == "song.mp3"
+    assert actions[0]["run_id"] == "run-123"
+    assert actions[0]["status"] == "deleted"
+
+
+def test_purge_destination_multi_file(tmp_path):
+    from core.sync_engine import purge_destination
+    
+    dest_dir = tmp_path / "destination"
+    backup_dir = tmp_path / "backup"
+    dest_dir.mkdir(parents=True)
+    backup_dir.mkdir()
+    
+    file1 = dest_dir / "song1.mp3"
+    file2 = dest_dir / "song2.mp3"
+    file1.write_bytes(b"data1")
+    file2.write_bytes(b"data2")
+    
+    config = {
+        "destination": str(dest_dir),
+        "backup": str(backup_dir),
+        "file_types": [".mp3"],
+    }
+    
+    result = purge_destination(config, "multi", run_id="run-456", file_paths=[str(file1), str(file2)])
+    
+    assert result["success"] is True
+    assert result["deleted"] == 2
+    assert not file1.exists()
+    assert not file2.exists()
+
+
+def test_purge_destination_full_run_by_run_id(tmp_path):
+    from core.sync_engine import purge_destination
+    
+    dest_dir = tmp_path / "destination"
+    backup_dir = tmp_path / "backup"
+    dest_dir.mkdir(parents=True)
+    backup_dir.mkdir()
+    
+    file1 = dest_dir / "song1.mp3"
+    file2 = dest_dir / "song2.mp3"
+    file1.write_bytes(b"data1")
+    file2.write_bytes(b"data2")
+    
+    metadata = [
+        {
+            "file_name": "song1.mp3",
+            "destination_path": str(file1),
+            "archive_path": str(dest_dir / "archive" / "song1.mp3"),
+            "run_id": "run-111",
+        },
+        {
+            "file_name": "song2.mp3",
+            "destination_path": str(file2),
+            "archive_path": str(dest_dir / "archive" / "song2.mp3"),
+            "run_id": "run-222",
+        },
+    ]
+    (backup_dir / "backup_metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+    
+    config = {
+        "destination": str(dest_dir),
+        "backup": str(backup_dir),
+        "file_types": [".mp3"],
+    }
+    
+    result = purge_destination(config, "full_run", run_id="run-111")
+    
+    assert result["success"] is True
+    assert result["deleted"] == 1
+    assert not file1.exists()
+    assert file2.exists()  # Only run-111 files should be deleted
+
+
+def test_purge_destination_full_all_does_not_require_run_id(tmp_path):
+    from core.sync_engine import purge_destination
+
+    dest_dir = tmp_path / "destination"
+    backup_dir = tmp_path / "backup"
+    dest_dir.mkdir(parents=True)
+    backup_dir.mkdir()
+
+    file1 = dest_dir / "song1.mp3"
+    file2 = dest_dir / "song2.mp3"
+    file1.write_bytes(b"data1")
+    file2.write_bytes(b"data2")
+
+    metadata = [
+        {
+            "file_name": "song1.mp3",
+            "destination_path": str(file1),
+            "archive_path": str(dest_dir / "archive" / "song1.mp3"),
+            "run_id": "run-111",
+        },
+        {
+            "file_name": "song2.mp3",
+            "destination_path": str(file2),
+            "archive_path": str(dest_dir / "archive" / "song2.mp3"),
+            "run_id": "run-222",
+        },
+    ]
+    (backup_dir / "backup_metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+    config = {
+        "destination": str(dest_dir),
+        "backup": str(backup_dir),
+        "file_types": [".mp3"],
+    }
+
+    result = purge_destination(config, "full_all")
+
+    assert result["success"] is True
+    assert result["deleted"] == 2
+    assert not file1.exists()
+    assert not file2.exists()
+
+
+def test_restore_archive_single_file(tmp_path):
+    from core.sync_engine import restore_archive
+    
+    archive_dir = tmp_path / "archive"
+    dest_dir = tmp_path / "destination"
+    backup_dir = tmp_path / "backup"
+    for path in (archive_dir, dest_dir, backup_dir):
+        path.mkdir(parents=True, exist_ok=True)
+    
+    archive_file = archive_dir / "song.mp3"
+    archive_file.write_bytes(b"song-data")
+    dest_file = dest_dir / "song.mp3"
+    
+    from core.validation import file_hash
+    hash_val = file_hash(str(archive_file))
+    
+    metadata = [
+        {
+            "file_name": "song.mp3",
+            "archive_path": str(archive_file),
+            "destination_path": str(dest_file),
+            "sha256": hash_val,
+            "run_id": "run-555",
+        }
+    ]
+    (backup_dir / "backup_metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+    
+    config = {
+        "archive": str(archive_dir),
+        "destination": str(dest_dir),
+        "backup": str(backup_dir),
+    }
+    
+    result = restore_archive(config, "single", file_paths=[str(archive_file)])
+    
+    assert result["success"] is True
+    assert result["restored"] == 1
+    assert dest_file.exists()
+
+
+def test_restore_archive_conflict_without_force(tmp_path):
+    from core.sync_engine import restore_archive
+    from core.validation import file_hash
+    
+    archive_dir = tmp_path / "archive"
+    dest_dir = tmp_path / "destination"
+    backup_dir = tmp_path / "backup"
+    for path in (archive_dir, dest_dir, backup_dir):
+        path.mkdir(parents=True, exist_ok=True)
+    
+    archive_file = archive_dir / "song.mp3"
+    archive_file.write_bytes(b"archive-data")
+    dest_file = dest_dir / "song.mp3"
+    dest_file.write_bytes(b"different-data")
+    
+    archive_hash = file_hash(str(archive_file))
+    
+    metadata = [
+        {
+            "file_name": "song.mp3",
+            "archive_path": str(archive_file),
+            "destination_path": str(dest_file),
+            "sha256": archive_hash,
+            "run_id": "run-666",
+        }
+    ]
+    (backup_dir / "backup_metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+    
+    config = {
+        "archive": str(archive_dir),
+        "destination": str(dest_dir),
+        "backup": str(backup_dir),
+    }
+    
+    result = restore_archive(config, "single", file_paths=[str(archive_file)], force_restore=False)
+    
+    assert result["success"] is True
+    assert result["conflicts"] == 1
+    assert len(result["errors"]) > 0  # Conflict should be logged
+
+
+def test_restore_archive_conflict_with_force(tmp_path):
+    from core.sync_engine import restore_archive
+    from core.validation import file_hash
+    
+    archive_dir = tmp_path / "archive"
+    dest_dir = tmp_path / "destination"
+    backup_dir = tmp_path / "backup"
+    for path in (archive_dir, dest_dir, backup_dir):
+        path.mkdir(parents=True, exist_ok=True)
+    
+    archive_file = archive_dir / "song.mp3"
+    archive_file.write_bytes(b"archive-data")
+    dest_file = dest_dir / "song.mp3"
+    dest_file.write_bytes(b"different-data")
+    
+    archive_hash = file_hash(str(archive_file))
+    
+    metadata = [
+        {
+            "file_name": "song.mp3",
+            "archive_path": str(archive_file),
+            "destination_path": str(dest_file),
+            "sha256": archive_hash,
+            "run_id": "run-777",
+        }
+    ]
+    (backup_dir / "backup_metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+    
+    config = {
+        "archive": str(archive_dir),
+        "destination": str(dest_dir),
+        "backup": str(backup_dir),
+    }
+    
+    result = restore_archive(config, "single", file_paths=[str(archive_file)], force_restore=True)
+    
+    assert result["success"] is True
+    assert result["restored"] == 1
+    assert dest_file.read_bytes() == b"archive-data"
