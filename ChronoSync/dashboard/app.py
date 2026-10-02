@@ -166,6 +166,33 @@ def render_empty_state(message, hint=None):
         st.caption(hint)
 
 
+def config_to_yaml_text(config):
+    payload = {key: value for key, value in config.items() if key != "config_path"}
+    return yaml.safe_dump(payload, sort_keys=False)
+
+
+def save_loaded_config(config_path, yaml_text):
+    resolved_path = Path(config_path).expanduser().resolve()
+    if not resolved_path.exists():
+        raise FileNotFoundError(f"Config file not found: {resolved_path}")
+
+    parsed = yaml.safe_load(yaml_text)
+    if not isinstance(parsed, dict):
+        raise ValueError("Config content must be a YAML mapping.")
+
+    temp_path = resolved_path.with_name(f".{resolved_path.name}.edit.tmp")
+    temp_path.write_text(yaml_text, encoding="utf-8")
+    try:
+        validated = load_config(str(temp_path))
+        resolved_path.write_text(yaml_text, encoding="utf-8")
+        return load_config(str(resolved_path))
+    finally:
+        try:
+            temp_path.unlink()
+        except OSError:
+            pass
+
+
 def main():
     st.set_page_config(page_title="ChronoSync Dashboard", layout="wide", initial_sidebar_state="expanded")
     if not st.session_state.get("registry_shutdown_registered"):
@@ -206,6 +233,7 @@ def main():
     loaded_config = {}
     registry_entries = load_registry()
     remembered_backup_drive = get_saved_backup_drive()
+    current_config_path = ""
 
     with st.sidebar:
         st.subheader("Configuration")
@@ -296,11 +324,63 @@ def main():
             st.error(f"Invalid config: {exc}")
             st.stop()
 
+        current_config_path = loaded_config.get("config_path", "")
+        if st.session_state.get("config_source_path") != current_config_path:
+            st.session_state["config_source_path"] = current_config_path
+            st.session_state["config_edit_mode"] = False
+            st.session_state["config_yaml_text"] = config_to_yaml_text(loaded_config)
+            st.session_state.pop("config_yaml_editor", None)
+
         st.success("Config loaded")
         st.caption(f"Device: {loaded_config.get('devicename', 'unknown')}")
         st.caption(f"Mode: {loaded_config.get('mode', 'unknown')}")
         st.caption(f"Config path: {loaded_config.get('config_path', 'unknown')}")
         st.caption(f"Reports path: {loaded_config.get('reports_path', 'unknown')}")
+
+        st.markdown("---")
+        st.subheader("Loaded Config")
+        st.text_area(
+            "Config details (read only)",
+            value=st.session_state.get("config_yaml_text", config_to_yaml_text(loaded_config)),
+            height=220,
+            disabled=True,
+            label_visibility="collapsed",
+            key="config_yaml_preview",
+        )
+
+        if current_config_path == "<uploaded>":
+            st.caption("Editing is available only for config files loaded from a path.")
+        else:
+            if not st.session_state.get("config_edit_mode", False):
+                if st.button("Edit/Update config"):
+                    st.session_state["config_edit_mode"] = True
+                    st.session_state["config_yaml_editor"] = st.session_state.get("config_yaml_text", config_to_yaml_text(loaded_config))
+                    st.rerun()
+            else:
+                st.text_area(
+                    "Edit config YAML",
+                    key="config_yaml_editor",
+                    height=260,
+                    label_visibility="collapsed",
+                )
+                edit_cols = st.columns(2)
+                with edit_cols[0]:
+                    if st.button("Save updated config"):
+                        try:
+                            updated_config = save_loaded_config(current_config_path, st.session_state.get("config_yaml_editor", ""))
+                        except (OSError, ValueError, yaml.YAMLError) as exc:
+                            st.error(f"Unable to save config: {exc}")
+                        else:
+                            st.session_state["config_edit_mode"] = False
+                            st.session_state["config_yaml_text"] = config_to_yaml_text(updated_config)
+                            st.session_state["config_yaml_editor"] = st.session_state["config_yaml_text"]
+                            st.success("Config saved.")
+                            st.rerun()
+                with edit_cols[1]:
+                    if st.button("Cancel edit"):
+                        st.session_state["config_edit_mode"] = False
+                        st.session_state.pop("config_yaml_editor", None)
+                        st.rerun()
 
         action_cols = st.columns(2)
         config_path_value = loaded_config.get("config_path", "")

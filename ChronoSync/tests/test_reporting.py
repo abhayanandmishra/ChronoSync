@@ -8,7 +8,7 @@ import backup_sync
 from core.config_loader import load_config, validate_config
 from core.reporting import generate_report, save_error_log, save_report_csv, save_report_json
 from core.sync_engine import run_sync
-from dashboard.app import load_reports_base, resolve_config_path
+from dashboard.app import config_to_yaml_text, load_reports_base, resolve_config_path, save_loaded_config
 
 
 def test_generate_report_aggregates_source_and_dest_stats(tmp_path):
@@ -256,6 +256,57 @@ def test_resolve_config_path_prefers_explicit_runtime_file(tmp_path):
     explicit = tmp_path / "runtime.yaml"
     explicit.write_text("mode: full\n", encoding="utf-8")
     assert resolve_config_path(str(explicit)) == explicit.resolve()
+
+
+def test_config_to_yaml_text_excludes_internal_config_path():
+    yaml_text = config_to_yaml_text({
+        "mode": "full",
+        "source": "/data/source",
+        "backup": "/data/backup",
+        "archive": "/data/archive",
+        "reports_path": "/data/reports",
+        "devicename": "demo",
+        "file_types": [".mp3"],
+        "config_path": "/tmp/device.yaml",
+    })
+
+    assert "config_path" not in yaml_text
+    assert "devicename: demo" in yaml_text
+
+
+def test_save_loaded_config_round_trip(tmp_path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    backup_dir = tmp_path / "backup"
+    archive_dir = tmp_path / "archive"
+    reports_dir = tmp_path / "reports"
+    config_path = tmp_path / "device.yaml"
+
+    original = {
+        "mode": "full",
+        "source": str(source_dir),
+        "backup": str(backup_dir),
+        "archive": str(archive_dir),
+        "reports_path": str(reports_dir),
+        "devicename": "demo-device",
+        "file_types": [".mp3"],
+        "destination": str(tmp_path / "destination"),
+    }
+    with config_path.open("w", encoding="utf-8") as fh:
+        yaml.safe_dump(original, fh, sort_keys=False)
+
+    edited_yaml = yaml.safe_dump(
+        {
+            **original,
+            "mode": "incremental",
+        },
+        sort_keys=False,
+    )
+
+    updated = save_loaded_config(str(config_path), edited_yaml)
+
+    assert updated["mode"] == "incremental"
+    assert yaml.safe_load(config_path.read_text(encoding="utf-8"))["mode"] == "incremental"
 
 
 def test_load_reports_base_uses_runtime_config_reports_path(tmp_path):
